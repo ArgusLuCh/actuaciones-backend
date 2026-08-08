@@ -127,8 +127,11 @@ app.post("/admin/usuarios", autenticar, soloAdmin, async (req, res) => {
 });
 
 app.delete("/admin/usuarios/:id", autenticar, soloAdmin, async (req, res) => {
-  await db.query("DELETE FROM usuarios WHERE id = $1 AND rol != 'admin'", [req.params.id]);
-  res.json({ mensaje: "Usuario eliminado" });
+  // Primero eliminar las actuaciones del usuario (las tareas se borran en cascada)
+  await db.query("DELETE FROM actuaciones WHERE usuario_id = $1", [req.params.id])
+  // Después eliminar el usuario
+  await db.query("DELETE FROM usuarios WHERE id = $1 AND rol != 'admin'", [req.params.id])
+  res.json({ mensaje: "Usuario eliminado" })
 });
 
 // ---- ACTUACIONES ----

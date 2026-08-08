@@ -164,9 +164,12 @@ app.delete("/actuaciones/:id", autenticar, async (req, res) => {
 
 // ---- TAREAS ----
 app.get("/actuaciones/:id/tareas", autenticar, async (req, res) => {
-  const resultado = await db.query("SELECT * FROM tareas WHERE actuacion_id = $1", [req.params.id]);
-  res.json(resultado.rows);
-});
+  const resultado = await db.query(
+    "SELECT * FROM tareas WHERE actuacion_id = $1 ORDER BY id ASC",
+    [req.params.id]
+  )
+  res.json(resultado.rows)
+})
 
 app.post("/actuaciones/:id/tareas", autenticar, async (req, res) => {
   const resultado = await db.query(

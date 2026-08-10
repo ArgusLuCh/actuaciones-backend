@@ -111,6 +111,19 @@ app.get("/admin/usuarios", autenticar, soloAdmin, async (req, res) => {
   res.json(resultado.rows);
 });
 
+app.get("/admin/actuaciones", autenticar, soloAdmin, async (req, res) => {
+  const resultado = await db.query(`
+    SELECT
+      actuaciones.*,
+      usuarios.nombre AS responsable_nombre,
+      usuarios.dni AS responsable_dni
+    FROM actuaciones
+    INNER JOIN usuarios ON usuarios.id = actuaciones.usuario_id
+    ORDER BY actuaciones.created_at DESC
+  `);
+  res.json(resultado.rows);
+});
+
 app.post("/admin/usuarios", autenticar, soloAdmin, async (req, res) => {
   const { nombre, dni } = req.body;
   const passwordTemporal = dni; // la contraseña temporal es el mismo DNI

@@ -32,9 +32,15 @@ async function iniciarDB() {
       lugar TEXT NOT NULL,
       caratula TEXT NOT NULL,
       fecha_recepcion TEXT NOT NULL,
+      elevada INTEGER NOT NULL DEFAULT 0,
+      elevada_en TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  // Mantener compatibilidad con bases de datos creadas antes del historial.
+  await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS elevada INTEGER NOT NULL DEFAULT 0");
+  await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS elevada_en TIMESTAMP");
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS tareas (
@@ -150,7 +156,15 @@ app.delete("/admin/usuarios/:id", autenticar, soloAdmin, async (req, res) => {
 // ---- ACTUACIONES ----
 app.get("/actuaciones", autenticar, async (req, res) => {
   const resultado = await db.query(
-    "SELECT * FROM actuaciones WHERE usuario_id = $1 ORDER BY created_at DESC",
+    "SELECT * FROM actuaciones WHERE usuario_id = $1 AND elevada = 0 ORDER BY created_at DESC",
+    [req.usuario.id]
+  );
+  res.json(resultado.rows);
+});
+
+app.get("/actuaciones/historial", autenticar, async (req, res) => {
+  const resultado = await db.query(
+    "SELECT * FROM actuaciones WHERE usuario_id = $1 AND elevada = 1 ORDER BY elevada_en DESC",
     [req.usuario.id]
   );
   res.json(resultado.rows);
@@ -173,6 +187,32 @@ app.post("/actuaciones", autenticar, async (req, res) => {
 app.delete("/actuaciones/:id", autenticar, async (req, res) => {
   await db.query("DELETE FROM actuaciones WHERE id = $1 AND usuario_id = $2", [req.params.id, req.usuario.id]);
   res.json({ mensaje: "Eliminada" });
+});
+
+app.put("/actuaciones/:id/elevar", autenticar, async (req, res) => {
+  const actuacion = await db.query(
+    "SELECT id FROM actuaciones WHERE id = $1 AND usuario_id = $2 AND elevada = 0",
+    [req.params.id, req.usuario.id]
+  );
+
+  if (actuacion.rows.length === 0) {
+    return res.status(404).json({ error: "Actuación no encontrada" });
+  }
+
+  const pendientes = await db.query(
+    "SELECT COUNT(*) AS cantidad FROM tareas WHERE actuacion_id = $1 AND completada = 0",
+    [req.params.id]
+  );
+
+  if (Number(pendientes.rows[0].cantidad) > 0) {
+    return res.status(400).json({ error: "Completá todas las tareas antes de elevar la actuación" });
+  }
+
+  const resultado = await db.query(
+    "UPDATE actuaciones SET elevada = 1, elevada_en = NOW() WHERE id = $1 AND usuario_id = $2 RETURNING *",
+    [req.params.id, req.usuario.id]
+  );
+  res.json(resultado.rows[0]);
 });
 
 // ---- TAREAS ----

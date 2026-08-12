@@ -9,6 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Punto público y liviano para comprobar disponibilidad o despertar el servicio.
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function iniciarDB() {

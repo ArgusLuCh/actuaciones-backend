@@ -265,4 +265,26 @@ app.put("/admin/usuarios/:id/reset-password", autenticar, soloAdmin, async (req,
   res.json({ mensaje: "Contraseña reseteada al DNI" })
 })
 
+// ESTADÍSTICAS — solo admin
+app.get("/estadisticas", autenticar, soloAdmin, async (req, res) => {
+  const resultado = await db.query(`
+    SELECT 
+      a.id,
+      a.numero,
+      a.damnificado,
+      a.lugar,
+      a.caratula,
+      a.fecha_recepcion,
+      a.created_at,
+      a.elevada,
+      a.elevada_en,
+      u.nombre AS actuario_nombre,
+      u.dni AS actuario_dni
+    FROM actuaciones a
+    JOIN usuarios u ON a.usuario_id = u.id
+    ORDER BY a.created_at DESC
+  `)
+  res.json(resultado.rows)
+})
+
 app.listen(PORT, () => console.log("Servidor corriendo en puerto " + PORT));

@@ -37,6 +37,7 @@ async function iniciarDB() {
       lugar TEXT NOT NULL,
       caratula TEXT NOT NULL,
       fecha_recepcion TEXT NOT NULL,
+      anio_denuncia INTEGER,
       actuario_responsable TEXT,
       elevada INTEGER NOT NULL DEFAULT 0,
       elevada_en TIMESTAMP,
@@ -48,6 +49,9 @@ async function iniciarDB() {
   await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS elevada INTEGER NOT NULL DEFAULT 0");
   await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS elevada_en TIMESTAMP");
   await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS actuario_responsable TEXT");
+  await db.query("ALTER TABLE actuaciones ADD COLUMN IF NOT EXISTS anio_denuncia INTEGER");
+  // Las actuaciones históricas pueden conocer sólo el año de denuncia.
+  await db.query("ALTER TABLE actuaciones ALTER COLUMN fecha_recepcion DROP NOT NULL");
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS tareas (
@@ -351,7 +355,7 @@ app.get("/estadisticas/resumen", autenticar, soloAdmin, async (req, res) => {
   const actuaciones = await db.query(`
     SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE elevada = 1)::int AS elevadas
     FROM actuaciones
-    WHERE ($1::int IS NULL OR EXTRACT(YEAR FROM created_at) = $1)
+    WHERE ($1::int IS NULL OR COALESCE(anio_denuncia, EXTRACT(YEAR FROM created_at)::int) = $1)
   `, [anio]);
   const actividades = await db.query(`
     SELECT tipo, COUNT(*)::int AS cantidad_registros, COALESCE(SUM(cantidad), 0)::int AS cantidad_total
@@ -373,6 +377,53 @@ app.get("/estadisticas/resumen", autenticar, soloAdmin, async (req, res) => {
     actividades: actividades.rows,
     allanamientos: allanamientos.rows[0]
   });
+});
+
+app.post("/admin/importar-actuaciones-historicas", autenticar, soloAdmin, async (req, res) => {
+  const filas = Array.isArray(req.body?.actuaciones) ? req.body.actuaciones : [];
+  if (filas.length === 0 || filas.length > 1000) {
+    return res.status(400).json({ error: "La importación debe contener entre 1 y 1000 actuaciones" });
+  }
+
+  const existentes = await db.query("SELECT UPPER(REGEXP_REPLACE(numero, '\\s+', '', 'g')) AS numero FROM actuaciones");
+  const numeros = new Set(existentes.rows.map(fila => fila.numero));
+  const importadas = [];
+  const omitidas = [];
+  const cliente = await db.connect();
+
+  try {
+    await cliente.query("BEGIN");
+    for (const fila of filas) {
+      const numero = textoNormalizado(fila.numero);
+      const clave = numero.replace(/\s+/g, "");
+      const anio = Number(fila.anio_denuncia);
+      if (!numero || !Number.isInteger(anio) || anio < 2000 || anio > 2100) {
+        omitidas.push({ numero: fila.numero || "SIN NÚMERO", motivo: "Número o año inválido" });
+        continue;
+      }
+      if (numeros.has(clave)) {
+        omitidas.push({ numero, motivo: "Ya existe" });
+        continue;
+      }
+      await cliente.query(`
+        INSERT INTO actuaciones
+        (usuario_id, numero, damnificado, lugar, caratula, fecha_recepcion, anio_denuncia, actuario_responsable, elevada, elevada_en)
+        VALUES ($1, $2, 'NO REGISTRA', 'NO REGISTRA', $3, NULL, $4, $5, 1, NOW())
+      `, [
+        req.usuario.id, numero, textoNormalizado(fila.caratula) || "NO REGISTRA",
+        anio, textoNormalizado(fila.actuario_responsable) || "NO REGISTRA"
+      ]);
+      numeros.add(clave);
+      importadas.push(numero);
+    }
+    await cliente.query("COMMIT");
+    res.status(201).json({ importadas: importadas.length, omitidas: omitidas.length, detalle_omitidas: omitidas });
+  } catch (error) {
+    await cliente.query("ROLLBACK");
+    res.status(500).json({ error: "No se pudo completar la importación histórica" });
+  } finally {
+    cliente.release();
+  }
 });
 
 // ---- REGISTRO GENERAL DE ACTIVIDAD ----
